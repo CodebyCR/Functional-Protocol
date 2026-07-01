@@ -7,8 +7,8 @@ import SwiftDiagnostics
 // ║                                                                            ║
 // ║  Attached to a protocol with exactly one method requirement, this macro    ║
 // ║  generates:                                                                ║
-// ║    • A @frozen bridge struct `Any<ProtocolName>` (PeerMacro)               ║
-// ║    • A `static func create(...)` factory extension (ExtensionMacro)        ║
+// ║    • A @frozen bridge struct `<ProtocolName>Functor` (PeerMacro)           ║
+// ║    • A `static func closure(...)` factory extension (ExtensionMacro)        ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 
 // MARK: - Extracted Protocol Metadata
@@ -17,7 +17,7 @@ import SwiftDiagnostics
 /// that is needed for code generation.
 struct ProtocolInfo {
     let protocolName: String
-    let structName: String        // "Any" + protocolName
+    let structName: String        // protocolName + "Functor"
     let associatedTypes: [String]
     let method: MethodInfo
     let isSendable: Bool
@@ -65,9 +65,6 @@ enum FunctionalProtocolDiagnostic: String, DiagnosticMessage {
     }
 }
 
-/// Sentinel error thrown after a diagnostic has already been emitted via `context.diagnose`.
-private struct DiagnosticAlreadyReported: Error {}
-
 // MARK: - Macro Type
 
 public struct FunctionalProtocolMacro {}
@@ -80,12 +77,14 @@ extension FunctionalProtocolMacro: PeerMacro {
         providingPeersOf declaration: some DeclSyntaxProtocol,
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        let info = try extractProtocolInfo(from: declaration, attribute: node, in: context)
+        guard let info = extractProtocolInfo(from: declaration, attribute: node, in: context, emitDiagnostics: true) else {
+            return []
+        }
         return [generateBridgeStruct(from: info)]
     }
 }
 
-// MARK: - ExtensionMacro (generates `extension Protocol { static func create(...) }`)
+// MARK: - ExtensionMacro (generates `extension Protocol { static func closure(...) }`)
 
 extension FunctionalProtocolMacro: ExtensionMacro {
     public static func expansion(
@@ -95,8 +94,11 @@ extension FunctionalProtocolMacro: ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
-        let info = try extractProtocolInfo(from: declaration, attribute: node, in: context)
-        return [try generateExtension(from: info)]
+        guard let info = extractProtocolInfo(from: declaration, attribute: node, in: context, emitDiagnostics: false),
+              let ext = generateExtension(from: info) else {
+            return []
+        }
+        return [ext]
     }
 }
 
@@ -105,18 +107,21 @@ extension FunctionalProtocolMacro: ExtensionMacro {
 extension FunctionalProtocolMacro {
 
     /// Parses a `ProtocolDeclSyntax` and extracts all metadata needed for code generation.
-    /// Reports diagnostics and throws if the protocol is invalid.
+    /// When `emitDiagnostics` is true (PeerMacro only), reports compiler errors for invalid protocols.
     private static func extractProtocolInfo<D: SyntaxProtocol>(
         from declaration: D,
         attribute: AttributeSyntax,
-        in context: some MacroExpansionContext
-    ) throws -> ProtocolInfo {
+        in context: some MacroExpansionContext,
+        emitDiagnostics: Bool
+    ) -> ProtocolInfo? {
         // ── 1. Must be a protocol ──────────────────────────────────────────
         guard let protocolDecl = declaration.as(ProtocolDeclSyntax.self) else {
-            context.diagnose(
-                Diagnostic(node: Syntax(attribute), message: FunctionalProtocolDiagnostic.notAProtocol)
-            )
-            throw DiagnosticAlreadyReported()
+            if emitDiagnostics {
+                context.diagnose(
+                    Diagnostic(node: Syntax(attribute), message: FunctionalProtocolDiagnostic.notAProtocol)
+                )
+            }
+            return nil
         }
 
         let protocolName = protocolDecl.name.trimmedDescription
@@ -132,11 +137,13 @@ extension FunctionalProtocolMacro {
         }
 
         guard methods.count == 1 else {
-            let diagnostic: FunctionalProtocolDiagnostic = methods.isEmpty ? .noMethods : .tooManyMethods
-            context.diagnose(
-                Diagnostic(node: Syntax(protocolDecl.memberBlock), message: diagnostic)
-            )
-            throw DiagnosticAlreadyReported()
+            if emitDiagnostics {
+                let diagnostic: FunctionalProtocolDiagnostic = methods.isEmpty ? .noMethods : .tooManyMethods
+                context.diagnose(
+                    Diagnostic(node: Syntax(protocolDecl.memberBlock), message: diagnostic)
+                )
+            }
+            return nil
         }
 
         let method = methods[0]
@@ -183,7 +190,7 @@ extension FunctionalProtocolMacro {
 
         return ProtocolInfo(
             protocolName: protocolName,
-            structName: "Any\(protocolName)",
+            structName: "\(protocolName)Functor",
             associatedTypes: associatedTypes,
             method: MethodInfo(
                 name: methodName,
@@ -255,7 +262,7 @@ extension FunctionalProtocolMacro {
         method.hasExplicitReturn ? " -> \(method.returnType)" : ""
     }
 
-    // ── Peer: @frozen struct Any<Protocol> ─────────────────────────────────
+    // ── Peer: @frozen struct <Protocol>Functor ──────────────────────────────
 
     private static func generateBridgeStruct(from info: ProtocolInfo) -> DeclSyntax {
         let generics    = genericClause(for: info.associatedTypes)
@@ -292,7 +299,7 @@ extension FunctionalProtocolMacro {
 
     // ── Extension: static func create(...) ─────────────────────────────────
 
-    private static func generateExtension(from info: ProtocolInfo) throws -> ExtensionDeclSyntax {
+    private static func generateExtension(from info: ProtocolInfo) -> ExtensionDeclSyntax? {
         let generics  = genericClause(for: info.associatedTypes)
         let closureT  = closureTypeString(for: info)
         let structT   = "\(info.structName)\(generics)"
@@ -301,16 +308,12 @@ extension FunctionalProtocolMacro {
         let extensionSource: DeclSyntax = """
         extension \(raw: info.protocolName) {
             @inlinable
-            public static func create\(raw: generics)(_ closure: @escaping \(raw: closureT)) -> \(raw: structT) \(raw: whereClause) {
+            public static func closure\(raw: generics)(_ closure: @escaping \(raw: closureT)) -> \(raw: structT) \(raw: whereClause) {
                 return \(raw: info.structName)(closure)
             }
         }
         """
 
-        guard let extensionDecl = extensionSource.as(ExtensionDeclSyntax.self) else {
-            throw DiagnosticAlreadyReported()
-        }
-
-        return extensionDecl
+        return extensionSource.as(ExtensionDeclSyntax.self)
     }
 }

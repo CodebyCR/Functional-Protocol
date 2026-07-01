@@ -36,7 +36,7 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AnyTransformer<Input, Output>: Transformer {
+            public struct TransformerFunctor<Input, Output>: Transformer {
                 @usableFromInline
                 internal let _closure: (Input) -> Output
 
@@ -58,8 +58,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Transformer {
                 @inlinable
-                public static func create<Input, Output>(_ closure: @escaping (Input) -> Output) -> AnyTransformer<Input, Output> where Self == AnyTransformer<Input, Output> {
-                    return AnyTransformer(closure)
+                public static func closure<Input, Output>(_ closure: @escaping (Input) -> Output) -> TransformerFunctor<Input, Output> where Self == TransformerFunctor<Input, Output> {
+                    return TransformerFunctor(closure)
                 }
             }
             """,
@@ -91,7 +91,7 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AnyPredicate<Element>: Predicate {
+            public struct PredicateFunctor<Element>: Predicate {
                 @usableFromInline
                 internal let _closure: (Element) -> Bool
 
@@ -113,8 +113,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Predicate {
                 @inlinable
-                public static func create<Element>(_ closure: @escaping (Element) -> Bool) -> AnyPredicate<Element> where Self == AnyPredicate<Element> {
-                    return AnyPredicate(closure)
+                public static func closure<Element>(_ closure: @escaping (Element) -> Bool) -> PredicateFunctor<Element> where Self == PredicateFunctor<Element> {
+                    return PredicateFunctor(closure)
                 }
             }
             """,
@@ -142,7 +142,7 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AnyLogger: Logger {
+            public struct LoggerFunctor: Logger {
                 @usableFromInline
                 internal let _closure: (String) -> Void
 
@@ -164,8 +164,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Logger {
                 @inlinable
-                public static func create(_ closure: @escaping (String) -> Void) -> AnyLogger where Self == AnyLogger {
-                    return AnyLogger(closure)
+                public static func closure(_ closure: @escaping (String) -> Void) -> LoggerFunctor where Self == LoggerFunctor {
+                    return LoggerFunctor(closure)
                 }
             }
             """,
@@ -199,7 +199,7 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AnyParser<Input, Output>: Parser {
+            public struct ParserFunctor<Input, Output>: Parser {
                 @usableFromInline
                 internal let _closure: (Input) throws -> Output
 
@@ -221,8 +221,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Parser {
                 @inlinable
-                public static func create<Input, Output>(_ closure: @escaping (Input) throws -> Output) -> AnyParser<Input, Output> where Self == AnyParser<Input, Output> {
-                    return AnyParser(closure)
+                public static func closure<Input, Output>(_ closure: @escaping (Input) throws -> Output) -> ParserFunctor<Input, Output> where Self == ParserFunctor<Input, Output> {
+                    return ParserFunctor(closure)
                 }
             }
             """,
@@ -256,7 +256,7 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AnyAsyncFetcher<Input, Output>: AsyncFetcher {
+            public struct AsyncFetcherFunctor<Input, Output>: AsyncFetcher {
                 @usableFromInline
                 internal let _closure: (Input) async throws -> Output
 
@@ -278,8 +278,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension AsyncFetcher {
                 @inlinable
-                public static func create<Input, Output>(_ closure: @escaping (Input) async throws -> Output) -> AnyAsyncFetcher<Input, Output> where Self == AnyAsyncFetcher<Input, Output> {
-                    return AnyAsyncFetcher(closure)
+                public static func closure<Input, Output>(_ closure: @escaping (Input) async throws -> Output) -> AsyncFetcherFunctor<Input, Output> where Self == AsyncFetcherFunctor<Input, Output> {
+                    return AsyncFetcherFunctor(closure)
                 }
             }
             """,
@@ -313,7 +313,7 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AnySendableTransformer<Input, Output>: SendableTransformer {
+            public struct SendableTransformerFunctor<Input, Output>: SendableTransformer {
                 @usableFromInline
                 internal let _closure: @Sendable (Input) -> Output
 
@@ -335,8 +335,61 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension SendableTransformer {
                 @inlinable
-                public static func create<Input, Output>(_ closure: @escaping @Sendable (Input) -> Output) -> AnySendableTransformer<Input, Output> where Self == AnySendableTransformer<Input, Output> {
-                    return AnySendableTransformer(closure)
+                public static func closure<Input, Output>(_ closure: @escaping @Sendable (Input) -> Output) -> SendableTransformerFunctor<Input, Output> where Self == SendableTransformerFunctor<Input, Output> {
+                    return SendableTransformerFunctor(closure)
+                }
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    // MARK: - Happy Path: Consuming Parameter
+
+    func testConsumingParameterExpansion() throws {
+        #if canImport(FunctionalProtocolMacros)
+        assertMacroExpansion(
+            """
+            @FunctionalProtocol
+            protocol Consumer {
+                associatedtype Element
+                func consume(_ element: consuming Element)
+            }
+            """,
+            expandedSource: """
+            protocol Consumer {
+                associatedtype Element
+                func consume(_ element: consuming Element)
+            }
+
+            @frozen
+            public struct ConsumerFunctor<Element>: Consumer {
+                @usableFromInline
+                internal let _closure: (consuming Element) -> Void
+
+                @inlinable
+                public init(_ closure: @escaping (consuming Element) -> Void) {
+                    self._closure = closure
+                }
+
+                @inlinable
+                public func consume(_ element: consuming Element) {
+                    return _closure(element)
+                }
+
+                @inlinable
+                public func callAsFunction(_ element: consuming Element) {
+                    return _closure(element)
+                }
+            }
+
+            extension Consumer {
+                @inlinable
+                public static func closure<Element>(_ closure: @escaping (consuming Element) -> Void) -> ConsumerFunctor<Element> where Self == ConsumerFunctor<Element> {
+                    return ConsumerFunctor(closure)
                 }
             }
             """,
@@ -429,7 +482,7 @@ final class FunctionalProtocolTests: XCTestCase {
                 DiagnosticSpec(
                     message: "'@FunctionalProtocol' requires exactly one method in the protocol, but found multiple.",
                     line: 2,
-                    column: 24
+                    column: 25
                 ),
             ],
             macros: testMacros

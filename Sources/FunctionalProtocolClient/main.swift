@@ -19,14 +19,27 @@ protocol Predicate {
     func evaluate(_ element: Element) -> Bool
 }
 
+// MARK: - Example 3: Consuming parameter (ownership transfer)
+
+@FunctionalProtocol
+protocol Consumer {
+    associatedtype Element
+    func consume(_ element: consuming Element)
+}
+
 // MARK: - Usage
 
-func processData<T: Transformer>(using transformer: T, input: T.Input) {
+// 5. consuming – ownership transferred into the closure on each call
+let logger = ConsumerFunctor<String> { print("Consumed: \($0)") }
+logger.consume("ownership")
+
+
+func processData<T: Transformer>(use transformer: T, input: T.Input) {
     let result = transformer.transform(input)
     print("Transformed: \(result)")
 }
 
-func filterElements(_ elements: [String], using predicate: AnyPredicate<String>) {
+func filterElements(_ elements: [String], using predicate: PredicateFunctor<String>) {
     for element in elements {
         if predicate.evaluate(element) {
             print("✓ \(element)")
@@ -34,19 +47,19 @@ func filterElements(_ elements: [String], using predicate: AnyPredicate<String>)
     }
 }
 
-// 1. Trailing-Closure via .create Factory
-processData(using: .create { (input: String) -> String in
+// 1. Trailing-Closure via .closure Factory
+processData(use: .closure { (input: String) -> String in
     input.uppercased()
 }, input: "Swift 6")
 
 // 2. Direct init of the bridge struct
-let lengthTransformer = AnyTransformer<String, Int> { $0.count }
+let lengthTransformer = TransformerFunctor<String, Int> { $0.count }
 print("Length: \(lengthTransformer.transform("Hello"))")
 
 // 3. callAsFunction – use the instance like a function
 print("callAsFunction: \(lengthTransformer("World"))")
 
 // 4. Predicate usage
-let isLong = AnyPredicate<String> { $0.count > 3 }
+let isLong = PredicateFunctor<String> { $0.count > 3 }
 print("Is 'Hi' long? \(isLong.evaluate("Hi"))")
 print("Is 'Hello' long? \(isLong("Hello"))")
