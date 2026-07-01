@@ -1,4 +1,4 @@
-# FunctionalProtocols
+# @FunctionalProtocol
 
 A Swift 6 compiler macro that lets you instantiate any single-method protocol directly from a closure — with zero boilerplate and zero runtime cost.
 
