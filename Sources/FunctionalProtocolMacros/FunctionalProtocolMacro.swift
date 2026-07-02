@@ -8,7 +8,7 @@ import SwiftDiagnostics
 // ║  Attached to a protocol with exactly one method requirement, this macro    ║
 // ║  generates:                                                                ║
 // ║    • A @frozen bridge struct `<ProtocolName>Functor` (PeerMacro)           ║
-// ║    • A `static func closure(...)` factory extension (ExtensionMacro)        ║
+// ║    • A static factory extension matching the method name (ExtensionMacro)  ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 
 // MARK: - Extracted Protocol Metadata
@@ -18,6 +18,7 @@ import SwiftDiagnostics
 struct ProtocolInfo {
     let protocolName: String
     let structName: String        // protocolName + "Functor"
+    let accessModifier: String    // "public", "package", "internal", or "" (default internal)
     let associatedTypes: [String]
     let method: MethodInfo
     let isSendable: Bool
@@ -46,6 +47,7 @@ enum FunctionalProtocolDiagnostic: String, DiagnosticMessage {
     case notAProtocol
     case noMethods
     case tooManyMethods
+    case genericMethod
 
     var severity: DiagnosticSeverity { .error }
 
@@ -57,6 +59,8 @@ enum FunctionalProtocolDiagnostic: String, DiagnosticMessage {
             return "'@FunctionalProtocol' requires exactly one method in the protocol, but found none."
         case .tooManyMethods:
             return "'@FunctionalProtocol' requires exactly one method in the protocol, but found multiple."
+        case .genericMethod:
+            return "'@FunctionalProtocol' does not support method-level generic parameters; use protocol-level 'associatedtype' instead."
         }
     }
 
@@ -69,7 +73,7 @@ enum FunctionalProtocolDiagnostic: String, DiagnosticMessage {
 
 public struct FunctionalProtocolMacro {}
 
-// MARK: - PeerMacro (generates `@frozen struct Any<Protocol>`)
+// MARK: - PeerMacro (generates `@frozen struct <Protocol>Functor`)
 
 extension FunctionalProtocolMacro: PeerMacro {
     public static func expansion(
@@ -84,7 +88,7 @@ extension FunctionalProtocolMacro: PeerMacro {
     }
 }
 
-// MARK: - ExtensionMacro (generates `extension Protocol { static func closure(...) }`)
+// MARK: - ExtensionMacro (generates `extension Protocol { static func <method>(...) }`)
 
 extension FunctionalProtocolMacro: ExtensionMacro {
     public static func expansion(
@@ -126,12 +130,22 @@ extension FunctionalProtocolMacro {
 
         let protocolName = protocolDecl.name.trimmedDescription
 
-        // ── 2. Collect associated types ────────────────────────────────────
+        // ── 2. Inherit access modifier ────────────────────────────────────
+        // The generated struct must have the same visibility as the protocol
+        // so that users can write extensions on the functor type.
+        let accessModifier: String = protocolDecl.modifiers.first { modifier in
+            ["public", "package", "internal", "fileprivate", "private"]
+                .contains(modifier.name.trimmedDescription)
+        }?.name.trimmedDescription ?? ""
+
+        // ── 3. Collect associated types ────────────────────────────────────
         let associatedTypes = protocolDecl.memberBlock.members.compactMap { member -> String? in
             member.decl.as(AssociatedTypeDeclSyntax.self)?.name.trimmedDescription
         }
 
-        // ── 3. Collect and validate methods ────────────────────────────────
+        // ── 4. Collect and validate methods ────────────────────────────────
+        // Protocol extensions are separate ExtensionDeclSyntax nodes and are
+        // not included in memberBlock, so only primary declarations are counted.
         let methods = protocolDecl.memberBlock.members.compactMap { member -> FunctionDeclSyntax? in
             member.decl.as(FunctionDeclSyntax.self)
         }
@@ -148,7 +162,19 @@ extension FunctionalProtocolMacro {
 
         let method = methods[0]
 
-        // ── 4. Extract method details ──────────────────────────────────────
+        // ── 5. Reject method-level generics ────────────────────────────────
+        // Swift cannot store a generic closure as a stored property
+        // (e.g., `let f: <T>(T) -> T` is illegal). Use associatedtype instead.
+        if method.genericParameterClause != nil {
+            if emitDiagnostics {
+                context.diagnose(
+                    Diagnostic(node: Syntax(method), message: FunctionalProtocolDiagnostic.genericMethod)
+                )
+            }
+            return nil
+        }
+
+        // ── 6. Extract method details ──────────────────────────────────────
         let methodName = method.name.trimmedDescription
 
         let parameters: [ParameterInfo] = method.signature.parameterClause.parameters
@@ -183,7 +209,7 @@ extension FunctionalProtocolMacro {
             throwsClause = nil
         }
 
-        // ── 5. Check Sendable conformance ──────────────────────────────────
+        // ── 7. Check Sendable conformance ──────────────────────────────────
         let isSendable = protocolDecl.inheritanceClause?.inheritedTypes.contains {
             $0.type.trimmedDescription == "Sendable"
         } ?? false
@@ -191,6 +217,7 @@ extension FunctionalProtocolMacro {
         return ProtocolInfo(
             protocolName: protocolName,
             structName: "\(protocolName)Functor",
+            accessModifier: accessModifier,
             associatedTypes: associatedTypes,
             method: MethodInfo(
                 name: methodName,
@@ -262,54 +289,86 @@ extension FunctionalProtocolMacro {
         method.hasExplicitReturn ? " -> \(method.returnType)" : ""
     }
 
+    /// Access modifier with trailing space, or empty string for default internal.
+    private static func acc(for info: ProtocolInfo) -> String {
+        info.accessModifier.isEmpty ? "" : "\(info.accessModifier) "
+    }
+
     // ── Peer: @frozen struct <Protocol>Functor ──────────────────────────────
 
     private static func generateBridgeStruct(from info: ProtocolInfo) -> DeclSyntax {
-        let generics    = genericClause(for: info.associatedTypes)
-        let closureT    = closureTypeString(for: info)
-        let params      = parameterClause(for: info.method.parameters)
-        let effects     = effectsString(for: info.method)
-        let retClause   = returnClause(for: info.method)
-        let callPfx     = callPrefix(for: info.method)
-        let args        = callArguments(for: info.method.parameters)
-
-        return """
-        @frozen
-        public struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
-            @usableFromInline
-            internal let _closure: \(raw: closureT)
-
-            @inlinable
-            public init(_ closure: @escaping \(raw: closureT)) {
-                self._closure = closure
-            }
-
-            @inlinable
-            public func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
-                return \(raw: callPfx)_closure(\(raw: args))
-            }
-
-            @inlinable
-            public func callAsFunction\(raw: params)\(raw: effects)\(raw: retClause) {
-                return \(raw: callPfx)_closure(\(raw: args))
-            }
-        }
-        """
-    }
-
-    // ── Extension: static func create(...) ─────────────────────────────────
-
-    private static func generateExtension(from info: ProtocolInfo) -> ExtensionDeclSyntax? {
         let generics  = genericClause(for: info.associatedTypes)
         let closureT  = closureTypeString(for: info)
-        let structT   = "\(info.structName)\(generics)"
+        let params    = parameterClause(for: info.method.parameters)
+        let effects   = effectsString(for: info.method)
+        let retClause = returnClause(for: info.method)
+        let callPfx   = callPrefix(for: info.method)
+        let args      = callArguments(for: info.method.parameters)
+        let access    = acc(for: info)
+        let propName  = "_\(info.method.name)"
+        // @frozen on an internal type requires @usableFromInline.
+        let usableAnnotation = info.accessModifier.isEmpty ? "\n@usableFromInline" : ""
+
+        // When the SAM is itself `callAsFunction`, suppress the synthesized
+        // wrapper to avoid a duplicate method declaration in the struct.
+        if info.method.name == "callAsFunction" {
+            return """
+            @frozen\(raw: usableAnnotation)
+            \(raw: access)struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
+                @usableFromInline
+                internal let \(raw: propName): \(raw: closureT)
+
+                @inlinable
+                \(raw: access)init(_ closure: @escaping \(raw: closureT)) {
+                    self.\(raw: propName) = closure
+                }
+
+                @inlinable
+                \(raw: access)func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
+                    return \(raw: callPfx)\(raw: propName)(\(raw: args))
+                }
+            }
+            """
+        } else {
+            return """
+            @frozen\(raw: usableAnnotation)
+            \(raw: access)struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
+                @usableFromInline
+                internal let \(raw: propName): \(raw: closureT)
+
+                @inlinable
+                \(raw: access)init(_ closure: @escaping \(raw: closureT)) {
+                    self.\(raw: propName) = closure
+                }
+
+                @inlinable
+                \(raw: access)func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
+                    return \(raw: callPfx)\(raw: propName)(\(raw: args))
+                }
+
+                @inlinable
+                \(raw: access)func callAsFunction\(raw: params)\(raw: effects)\(raw: retClause) {
+                    return \(raw: callPfx)\(raw: propName)(\(raw: args))
+                }
+            }
+            """
+        }
+    }
+
+    // ── Extension: static func <methodName>(...) ────────────────────────────
+
+    private static func generateExtension(from info: ProtocolInfo) -> ExtensionDeclSyntax? {
+        let generics    = genericClause(for: info.associatedTypes)
+        let closureT    = closureTypeString(for: info)
+        let structT     = "\(info.structName)\(generics)"
         let whereClause = "where Self == \(structT)"
+        let access      = acc(for: info)
 
         let extensionSource: DeclSyntax = """
         extension \(raw: info.protocolName) {
             @inlinable
-            public static func closure\(raw: generics)(_ closure: @escaping \(raw: closureT)) -> \(raw: structT) \(raw: whereClause) {
-                return \(raw: info.structName)(closure)
+            \(raw: access)static func \(raw: info.method.name)\(raw: generics)(_ block: @escaping \(raw: closureT)) -> \(raw: structT) \(raw: whereClause) {
+                return \(raw: info.structName)(block)
             }
         }
         """

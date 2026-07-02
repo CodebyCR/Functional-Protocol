@@ -36,30 +36,31 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct TransformerFunctor<Input, Output>: Transformer {
+            @usableFromInline
+            struct TransformerFunctor<Input, Output>: Transformer {
                 @usableFromInline
-                internal let _closure: (Input) -> Output
+                internal let _transform: (Input) -> Output
 
                 @inlinable
-                public init(_ closure: @escaping (Input) -> Output) {
-                    self._closure = closure
+                init(_ closure: @escaping (Input) -> Output) {
+                    self._transform = closure
                 }
 
                 @inlinable
-                public func transform(_ input: Input) -> Output {
-                    return _closure(input)
+                func transform(_ input: Input) -> Output {
+                    return _transform(input)
                 }
 
                 @inlinable
-                public func callAsFunction(_ input: Input) -> Output {
-                    return _closure(input)
+                func callAsFunction(_ input: Input) -> Output {
+                    return _transform(input)
                 }
             }
 
             extension Transformer {
                 @inlinable
-                public static func closure<Input, Output>(_ closure: @escaping (Input) -> Output) -> TransformerFunctor<Input, Output> where Self == TransformerFunctor<Input, Output> {
-                    return TransformerFunctor(closure)
+                static func transform<Input, Output>(_ block: @escaping (Input) -> Output) -> TransformerFunctor<Input, Output> where Self == TransformerFunctor<Input, Output> {
+                    return TransformerFunctor(block)
                 }
             }
             """,
@@ -91,30 +92,31 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct PredicateFunctor<Element>: Predicate {
+            @usableFromInline
+            struct PredicateFunctor<Element>: Predicate {
                 @usableFromInline
-                internal let _closure: (Element) -> Bool
+                internal let _evaluate: (Element) -> Bool
 
                 @inlinable
-                public init(_ closure: @escaping (Element) -> Bool) {
-                    self._closure = closure
+                init(_ closure: @escaping (Element) -> Bool) {
+                    self._evaluate = closure
                 }
 
                 @inlinable
-                public func evaluate(_ element: Element) -> Bool {
-                    return _closure(element)
+                func evaluate(_ element: Element) -> Bool {
+                    return _evaluate(element)
                 }
 
                 @inlinable
-                public func callAsFunction(_ element: Element) -> Bool {
-                    return _closure(element)
+                func callAsFunction(_ element: Element) -> Bool {
+                    return _evaluate(element)
                 }
             }
 
             extension Predicate {
                 @inlinable
-                public static func closure<Element>(_ closure: @escaping (Element) -> Bool) -> PredicateFunctor<Element> where Self == PredicateFunctor<Element> {
-                    return PredicateFunctor(closure)
+                static func evaluate<Element>(_ block: @escaping (Element) -> Bool) -> PredicateFunctor<Element> where Self == PredicateFunctor<Element> {
+                    return PredicateFunctor(block)
                 }
             }
             """,
@@ -142,30 +144,31 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct LoggerFunctor: Logger {
+            @usableFromInline
+            struct LoggerFunctor: Logger {
                 @usableFromInline
-                internal let _closure: (String) -> Void
+                internal let _log: (String) -> Void
 
                 @inlinable
-                public init(_ closure: @escaping (String) -> Void) {
-                    self._closure = closure
+                init(_ closure: @escaping (String) -> Void) {
+                    self._log = closure
                 }
 
                 @inlinable
-                public func log(_ message: String) {
-                    return _closure(message)
+                func log(_ message: String) {
+                    return _log(message)
                 }
 
                 @inlinable
-                public func callAsFunction(_ message: String) {
-                    return _closure(message)
+                func callAsFunction(_ message: String) {
+                    return _log(message)
                 }
             }
 
             extension Logger {
                 @inlinable
-                public static func closure(_ closure: @escaping (String) -> Void) -> LoggerFunctor where Self == LoggerFunctor {
-                    return LoggerFunctor(closure)
+                static func log(_ block: @escaping (String) -> Void) -> LoggerFunctor where Self == LoggerFunctor {
+                    return LoggerFunctor(block)
                 }
             }
             """,
@@ -199,30 +202,31 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct ParserFunctor<Input, Output>: Parser {
+            @usableFromInline
+            struct ParserFunctor<Input, Output>: Parser {
                 @usableFromInline
-                internal let _closure: (Input) throws -> Output
+                internal let _parse: (Input) throws -> Output
 
                 @inlinable
-                public init(_ closure: @escaping (Input) throws -> Output) {
-                    self._closure = closure
+                init(_ closure: @escaping (Input) throws -> Output) {
+                    self._parse = closure
                 }
 
                 @inlinable
-                public func parse(_ input: Input) throws -> Output {
-                    return try _closure(input)
+                func parse(_ input: Input) throws -> Output {
+                    return try _parse(input)
                 }
 
                 @inlinable
-                public func callAsFunction(_ input: Input) throws -> Output {
-                    return try _closure(input)
+                func callAsFunction(_ input: Input) throws -> Output {
+                    return try _parse(input)
                 }
             }
 
             extension Parser {
                 @inlinable
-                public static func closure<Input, Output>(_ closure: @escaping (Input) throws -> Output) -> ParserFunctor<Input, Output> where Self == ParserFunctor<Input, Output> {
-                    return ParserFunctor(closure)
+                static func parse<Input, Output>(_ block: @escaping (Input) throws -> Output) -> ParserFunctor<Input, Output> where Self == ParserFunctor<Input, Output> {
+                    return ParserFunctor(block)
                 }
             }
             """,
@@ -256,30 +260,31 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct AsyncFetcherFunctor<Input, Output>: AsyncFetcher {
+            @usableFromInline
+            struct AsyncFetcherFunctor<Input, Output>: AsyncFetcher {
                 @usableFromInline
-                internal let _closure: (Input) async throws -> Output
+                internal let _fetch: (Input) async throws -> Output
 
                 @inlinable
-                public init(_ closure: @escaping (Input) async throws -> Output) {
-                    self._closure = closure
+                init(_ closure: @escaping (Input) async throws -> Output) {
+                    self._fetch = closure
                 }
 
                 @inlinable
-                public func fetch(_ input: Input) async throws -> Output {
-                    return try await _closure(input)
+                func fetch(_ input: Input) async throws -> Output {
+                    return try await _fetch(input)
                 }
 
                 @inlinable
-                public func callAsFunction(_ input: Input) async throws -> Output {
-                    return try await _closure(input)
+                func callAsFunction(_ input: Input) async throws -> Output {
+                    return try await _fetch(input)
                 }
             }
 
             extension AsyncFetcher {
                 @inlinable
-                public static func closure<Input, Output>(_ closure: @escaping (Input) async throws -> Output) -> AsyncFetcherFunctor<Input, Output> where Self == AsyncFetcherFunctor<Input, Output> {
-                    return AsyncFetcherFunctor(closure)
+                static func fetch<Input, Output>(_ block: @escaping (Input) async throws -> Output) -> AsyncFetcherFunctor<Input, Output> where Self == AsyncFetcherFunctor<Input, Output> {
+                    return AsyncFetcherFunctor(block)
                 }
             }
             """,
@@ -313,30 +318,31 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct SendableTransformerFunctor<Input, Output>: SendableTransformer {
+            @usableFromInline
+            struct SendableTransformerFunctor<Input, Output>: SendableTransformer {
                 @usableFromInline
-                internal let _closure: @Sendable (Input) -> Output
+                internal let _transform: @Sendable (Input) -> Output
 
                 @inlinable
-                public init(_ closure: @escaping @Sendable (Input) -> Output) {
-                    self._closure = closure
+                init(_ closure: @escaping @Sendable (Input) -> Output) {
+                    self._transform = closure
                 }
 
                 @inlinable
-                public func transform(_ input: Input) -> Output {
-                    return _closure(input)
+                func transform(_ input: Input) -> Output {
+                    return _transform(input)
                 }
 
                 @inlinable
-                public func callAsFunction(_ input: Input) -> Output {
-                    return _closure(input)
+                func callAsFunction(_ input: Input) -> Output {
+                    return _transform(input)
                 }
             }
 
             extension SendableTransformer {
                 @inlinable
-                public static func closure<Input, Output>(_ closure: @escaping @Sendable (Input) -> Output) -> SendableTransformerFunctor<Input, Output> where Self == SendableTransformerFunctor<Input, Output> {
-                    return SendableTransformerFunctor(closure)
+                static func transform<Input, Output>(_ block: @escaping @Sendable (Input) -> Output) -> SendableTransformerFunctor<Input, Output> where Self == SendableTransformerFunctor<Input, Output> {
+                    return SendableTransformerFunctor(block)
                 }
             }
             """,
@@ -366,30 +372,78 @@ final class FunctionalProtocolTests: XCTestCase {
             }
 
             @frozen
-            public struct ConsumerFunctor<Element>: Consumer {
+            @usableFromInline
+            struct ConsumerFunctor<Element>: Consumer {
                 @usableFromInline
-                internal let _closure: (consuming Element) -> Void
+                internal let _consume: (consuming Element) -> Void
 
                 @inlinable
-                public init(_ closure: @escaping (consuming Element) -> Void) {
-                    self._closure = closure
+                init(_ closure: @escaping (consuming Element) -> Void) {
+                    self._consume = closure
                 }
 
                 @inlinable
-                public func consume(_ element: consuming Element) {
-                    return _closure(element)
+                func consume(_ element: consuming Element) {
+                    return _consume(element)
                 }
 
                 @inlinable
-                public func callAsFunction(_ element: consuming Element) {
-                    return _closure(element)
+                func callAsFunction(_ element: consuming Element) {
+                    return _consume(element)
                 }
             }
 
             extension Consumer {
                 @inlinable
-                public static func closure<Element>(_ closure: @escaping (consuming Element) -> Void) -> ConsumerFunctor<Element> where Self == ConsumerFunctor<Element> {
-                    return ConsumerFunctor(closure)
+                static func consume<Element>(_ block: @escaping (consuming Element) -> Void) -> ConsumerFunctor<Element> where Self == ConsumerFunctor<Element> {
+                    return ConsumerFunctor(block)
+                }
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    // MARK: - Happy Path: callAsFunction Collision Protection
+
+    func testCallAsFunctionCollisionProtection() throws {
+        #if canImport(FunctionalProtocolMacros)
+        assertMacroExpansion(
+            """
+            @FunctionalProtocol
+            protocol Callable {
+                func callAsFunction(_ value: Int) -> Int
+            }
+            """,
+            expandedSource: """
+            protocol Callable {
+                func callAsFunction(_ value: Int) -> Int
+            }
+
+            @frozen
+            @usableFromInline
+            struct CallableFunctor: Callable {
+                @usableFromInline
+                internal let _callAsFunction: (Int) -> Int
+
+                @inlinable
+                init(_ closure: @escaping (Int) -> Int) {
+                    self._callAsFunction = closure
+                }
+
+                @inlinable
+                func callAsFunction(_ value: Int) -> Int {
+                    return _callAsFunction(value)
+                }
+            }
+
+            extension Callable {
+                @inlinable
+                static func callAsFunction(_ block: @escaping (Int) -> Int) -> CallableFunctor where Self == CallableFunctor {
+                    return CallableFunctor(block)
                 }
             }
             """,
@@ -483,6 +537,36 @@ final class FunctionalProtocolTests: XCTestCase {
                     message: "'@FunctionalProtocol' requires exactly one method in the protocol, but found multiple.",
                     line: 2,
                     column: 25
+                ),
+            ],
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    // MARK: - Error: Method-Level Generic Parameters
+
+    func testDiagnosticGenericMethod() throws {
+        #if canImport(FunctionalProtocolMacros)
+        assertMacroExpansion(
+            """
+            @FunctionalProtocol
+            protocol GenericMethod {
+                func transform<T>(_ value: T) -> T
+            }
+            """,
+            expandedSource: """
+            protocol GenericMethod {
+                func transform<T>(_ value: T) -> T
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: "'@FunctionalProtocol' does not support method-level generic parameters; use protocol-level 'associatedtype' instead.",
+                    line: 3,
+                    column: 5
                 ),
             ],
             macros: testMacros

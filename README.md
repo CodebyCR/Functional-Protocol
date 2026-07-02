@@ -1,173 +1,234 @@
-# FunctionalProtocols
+# `@FunctionalProtocol`
 
-A Swift 6 compiler macro that lets you instantiate any single-method protocol directly from a closure — with zero boilerplate and zero runtime cost.
+A Swift 6 compiler macro that derives a zero-cost closure wrapper for any Single Abstract Method (SAM) protocol — one annotation, no boilerplate, full optimizer visibility.
 
 ```swift
 @FunctionalProtocol
-protocol Transformer {
+public protocol Transformer {
     associatedtype Input
     associatedtype Output
     func transform(_ input: Input) -> Output
 }
 
-// That's it. Now use it:
-processData(use: .closure { $0.uppercased() })
+// That's all. Now use it:
+processData(use: .transform { $0.uppercased() })
 ```
 
 ---
 
-## The Problem
+## Motivation
 
-### Protocols are powerful. Conforming to them is tedious.
+### The Conformance Tax
 
-When you design an API around a protocol, callers need a concrete type that conforms to it. In practice this means one of three paths, all of which have friction:
-
-**Option A — Write a dedicated conforming type every time:**
-```swift
-struct UppercaseTransformer: Transformer {
-    func transform(_ input: String) -> String {
-        input.uppercased()
-    }
-}
-processData(use: UppercaseTransformer())
-```
-A full type declaration for a single line of logic. This adds noise, scatters intent, and clutters the codebase with one-off types.
-
-**Option B — Write a hand-rolled type-erasing wrapper:**
-```swift
-@frozen
-public struct TransformerFunctor<Input, Output>: Transformer {
-    @usableFromInline internal let _closure: @escaping (Input) -> Output
-
-    @inlinable public init(_ closure: @escaping (Input) -> Output) {
-        self._closure = closure
-    }
-    @inlinable public func transform(_ input: Input) -> Output {
-        _closure(input)
-    }
-}
-```
-Correct and performant — but you write this for *every* protocol. The logic you care about is completely buried under performance annotations.
-
-**Option C — Use an existential (`any Transformer`):**
-This boxes the value on the heap, disables generic specialization, and loses static dispatch. You trade performance for convenience.
-
-### The Keyword Hell
-
-The hand-rolled wrapper is the right technical solution, but it forces you to write a wall of annotations that have nothing to do with your actual intent:
-
-```
-@frozen @usableFromInline @inlinable @escaping public internal
-```
-
-These keywords exist purely to guide the compiler optimizer. They are correct and necessary — but they are infrastructure, not domain logic. Every protocol you want to use this way demands the same ritual.
-
----
-
-## The Solution
-
-`@FunctionalProtocol` is a Swift 6 compiler macro. You annotate your protocol, and the macro **generates the entire bridge infrastructure at compile time** — the `@frozen` struct, all `@inlinable` annotations, the `@usableFromInline` storage, and a `.closure` factory for clean call sites.
-
-Your code expresses intent. The compiler gets its optimizer hints. Neither you nor your readers ever see the boilerplate.
+Swift protocols are the canonical abstraction tool, but every protocol that an API accepts forces callers to pay a *conformance tax*: they must declare a named type. For protocols with a single method, this named type often contains nothing but a forwarding call:
 
 ```swift
-// Before: scattered intent, lots of noise
+// The API
+func processData<T: Transformer>(use t: T, input: T.Input) { ... }
+
+// The tax — a full type for one line of logic
 struct UppercaseTransformer: Transformer {
     func transform(_ input: String) -> String { input.uppercased() }
 }
-processData(use: UppercaseTransformer())
-
-// After: intent at the call site, nothing else
-processData(use: .closure { $0.uppercased() })
+processData(use: UppercaseTransformer(), input: "swift")
 ```
 
-The generated code is identical to what you would write by hand — `@frozen`, `@inlinable`, the works. The difference is you never have to read or maintain it.
+Three alternatives exist, and all carry costs:
+
+| Approach | Problem |
+|---|---|
+| Named conforming struct | Boilerplate, clutters the namespace |
+| Hand-rolled `@frozen` wrapper | Correct, but you write the same ritual for every protocol |
+| Existential (`any Transformer`) | Heap allocation, no generic specialization, dynamic dispatch |
+
+### The Hand-Rolled Wrapper is Right — But Tedious
+
+The correct solution looks like this:
+
+```swift
+@frozen
+public struct TransformerFunctor<Input, Output>: Transformer {
+    @usableFromInline internal let _transform: (Input) -> Output
+
+    @inlinable
+    public init(_ block: @escaping (Input) -> Output) {
+        self._transform = block
+    }
+
+    @inlinable
+    public func transform(_ input: Input) -> Output {
+        _transform(input)
+    }
+}
+
+extension Transformer {
+    @inlinable
+    public static func transform<I, O>(
+        _ block: @escaping (I) -> O
+    ) -> TransformerFunctor<I, O> where Self == TransformerFunctor<I, O> {
+        TransformerFunctor(block)
+    }
+}
+```
+
+This is `@frozen` for ABI stability, `@inlinable` for cross-module optimization, and `@usableFromInline` on the stored property so inlined callers can reach it. The compiler can specialize and fully inline it. But you write this boilerplate for *every single protocol*.
 
 ---
 
-## What This Is Not
+## Proposed Solution
 
-### Not Java's `@FunctionalInterface`
+`@FunctionalProtocol` is an attached macro. You annotate the protocol, and the compiler generates the entire bridge at compile time. The output is syntactically identical to the hand-rolled wrapper — `@frozen`, `@inlinable`, `@usableFromInline` — you just never read or maintain it.
 
-Java's `@FunctionalInterface` is a **validation annotation**. It tells the compiler "this interface has exactly one abstract method" and allows lambda assignment. That's the whole feature — it doesn't generate any code.
+```swift
+// Before
+struct UppercaseTransformer: Transformer {
+    func transform(_ input: String) -> String { input.uppercased() }
+}
+processData(use: UppercaseTransformer(), input: "swift")
 
-`@FunctionalProtocol` is a **code generation macro**. The annotation triggers an AST transformation that produces a fully-formed, performance-annotated concrete type. The one-method constraint is enforced the same way, but the outcome is fundamentally different:
+// After
+processData(use: .transform { $0.uppercased() }, input: "swift")
+```
 
-| | Java `@FunctionalInterface` | Swift `@FunctionalProtocol` |
-|---|---|---|
-| Validates single method | Yes | Yes (compile-time error otherwise) |
-| Generates code | No | Yes — a full `@frozen` bridge struct |
-| Enables closure syntax | Via language feature (lambda) | Via generated `.closure` factory |
-| Runtime cost | JVM boxing | Zero — static dispatch, inlined (best case) |
-| Type erasure | Yes (via object reference) | No — concrete generic struct |
-
-### Not a type-erasing box
-
-Swift's standard library uses the `Any...` naming convention for **existential wrappers** (`AnyIterator`, `AnyPublisher`) that erase the underlying type through a heap-allocated box. This pattern trades performance for flexibility.
-The struct generated by `@FunctionalProtocol` deliberately avoids that convention. The `...Functor` suffix signals the C++ meaning: a callable object backed by a closure. It is a **concrete generic type** that conforms directly to the protocol. The compiler can fully specialize and inline it. There is no heap allocation, no dynamic dispatch, no type erasure in the existential sense.
-
-### Not a runtime feature
-
-Everything happens during compilation. The expanded code is plain Swift — no reflection, no runtime lookup, no overhead that appears after the build.
+The generated code is identical in performance characteristics to what you would write by hand. The difference is you don't have to.
 
 ---
 
-## Features
+## Detailed Design
 
-- **Zero boilerplate** — one annotation replaces a full type declaration
-- **Zero runtime cost** — `@frozen` + `@inlinable` enables full cross-module optimization
-- **Closure call syntax** — instances support `callAsFunction`, so you can call them directly
-- **`async` / `throws` aware** — effect specifiers on the protocol method are forwarded to the generated type automatically
-- **`Sendable` aware** — if the protocol inherits `Sendable`, the closure is marked `@Sendable`
-- **Compile-time safety** — the macro emits a clear diagnostic error if the protocol has zero or more than one method
+### Generation Template
 
----
-
-## Usage
-
-### Basic usage
+For a `public` protocol:
 
 ```swift
 @FunctionalProtocol
-protocol Transformer {
+public protocol Transformer: Sendable {
+    associatedtype Input
+    associatedtype Output
+    func transform(_ input: consuming Input) async throws -> Output
+}
+```
+
+The macro expands to exactly:
+
+```swift
+// — Peer (generated alongside the protocol declaration) —
+
+@frozen
+public struct TransformerFunctor<Input, Output>: Transformer {
+
+    @usableFromInline
+    internal let _transform: @Sendable (consuming Input) async throws -> Output
+
+    @inlinable
+    public init(_ closure: @escaping @Sendable (consuming Input) async throws -> Output) {
+        self._transform = closure
+    }
+
+    @inlinable
+    public func transform(_ input: consuming Input) async throws -> Output {
+        return try await _transform(input)
+    }
+
+    // Allows calling the instance directly like a closure
+    @inlinable
+    public func callAsFunction(_ input: consuming Input) async throws -> Output {
+        return try await _transform(input)
+    }
+}
+
+// — Extension (adds the static factory to the protocol) —
+
+extension Transformer {
+    @inlinable
+    public static func transform<Input, Output>(
+        _ block: @escaping @Sendable (consuming Input) async throws -> Output
+    ) -> TransformerFunctor<Input, Output>
+    where Self == TransformerFunctor<Input, Output> {
+        return TransformerFunctor(block)
+    }
+}
+```
+
+### Rules
+
+| Rule | Detail |
+|---|---|
+| Factory name | Mirrors the SAM identifier — `func transform(...)` → `.transform { ... }` |
+| Access modifier | Inherited from the protocol — `public protocol` → `public struct` |
+| `@frozen` on internal types | Requires `@usableFromInline` — added automatically |
+| `@Sendable` closure | Added when protocol inherits `Sendable` |
+| Effects (`async`, `throws`, typed throws) | Extracted from the AST and forwarded 1:1 |
+| Ownership (`consuming`, `borrowing`) | Preserved as part of the parameter type |
+| `callAsFunction` collision | Suppressed when the SAM is itself named `callAsFunction` |
+
+---
+
+## What Works
+
+### Basic: two associated types
+
+```swift
+@FunctionalProtocol
+public protocol Transformer {
     associatedtype Input
     associatedtype Output
     func transform(_ input: Input) -> Output
 }
 
-// Factory syntax (type inferred from context)
-processData(use: .closure { $0.uppercased() })
+// ✅ Static factory — name mirrors the method
+processData(use: .transform { $0.uppercased() })
 
-// Direct struct init
-let counter = TransformerFunctor<String, Int> { $0.count }
+// ✅ Direct struct initializer
+let t = TransformerFunctor<String, Int> { $0.count }
 
-// Call as function
-counter("Hello") // → 5
+// ✅ callAsFunction — call the instance like a closure
+t("Hello")  // → 5
 ```
 
 ### Concrete types (no associated types)
 
 ```swift
 @FunctionalProtocol
-protocol Logger {
+public protocol Logger {
     func log(_ message: String)
 }
 
-let print = LoggerFunctor { print($0) }
+// ✅ No generics in the factory — type is fully resolved
+let logger = LoggerFunctor { print($0) }
+acceptLogger(.log { print($0) })
 ```
 
-### Async and throwing
+### Effects: `async throws`
 
 ```swift
 @FunctionalProtocol
-protocol AsyncFetcher {
-    associatedtype Input
-    associatedtype Output
-    func fetch(_ input: Input) async throws -> Output
+public protocol Fetcher {
+    associatedtype Resource
+    func fetch(_ url: URL) async throws -> Resource
 }
 
-let fetcher = AsyncFetcherFunctor<URL, Data> { url in
+// ✅ Effects are forwarded to the closure signature
+let f = FetcherFunctor<Data> { url in
     try await URLSession.shared.data(from: url).0
+}
+let data = try await f.fetch(someURL)
+let data2 = try await f(someURL)          // callAsFunction also has async throws
+```
+
+### Typed throws (Swift 6)
+
+```swift
+@FunctionalProtocol
+public protocol Validator {
+    associatedtype Value
+    func validate(_ value: Value) throws(ValidationError) -> Value
+}
+
+// ✅ Typed throws is preserved — no type erasure on the error
+let v = ValidatorFunctor<Int> { n in
+    guard n > 0 else { throw ValidationError.negative }
+    return n
 }
 ```
 
@@ -175,30 +236,178 @@ let fetcher = AsyncFetcherFunctor<URL, Data> { url in
 
 ```swift
 @FunctionalProtocol
-protocol SendableTransformer: Sendable {
-    associatedtype Input
-    associatedtype Output
-    func transform(_ input: Input) -> Output
+public protocol Worker: Sendable {
+    associatedtype Job
+    func perform(_ job: Job) async -> Void
 }
-// The generated closure storage is automatically @Sendable
+
+// ✅ Closure is @Sendable — safe to cross actor boundaries
+let w = WorkerFunctor<String> { job in
+    await Task.detached { print(job) }.value
+}
 ```
 
-### Compile-time enforcement
+### Ownership modifiers
 
 ```swift
 @FunctionalProtocol
-protocol TooMany {
-    func first()
-    func second() // ❌ error: '@FunctionalProtocol' requires exactly one method, but found multiple.
+public protocol Sink {
+    associatedtype Element
+    func consume(_ element: consuming Element)
+}
+
+// ✅ consuming is preserved in both the closure type and the method signature
+let sink = SinkFunctor<Data> { data in process(data) }
+```
+
+### Visibility inheritance
+
+```swift
+// ✅ public protocol → public struct (usable across modules)
+@FunctionalProtocol
+public protocol Serializer { ... }
+// Generates: public struct SerializerFunctor ...
+
+// ✅ package protocol → package struct
+@FunctionalProtocol
+package protocol InternalService { ... }
+// Generates: package struct InternalServiceFunctor ...
+
+// ✅ internal protocol → @usableFromInline struct (satisfies @frozen constraint)
+@FunctionalProtocol
+protocol Helper { ... }
+// Generates: @frozen @usableFromInline struct HelperFunctor ...
+```
+
+### Protocol-level generics via `associatedtype`
+
+```swift
+// ✅ associatedtype is the correct way to parameterize the protocol
+@FunctionalProtocol
+public protocol Mapper {
+    associatedtype Input
+    associatedtype Output
+    func map(_ input: Input) -> Output
 }
 ```
+
+### `callAsFunction` as the SAM name
+
+```swift
+// ✅ Collision protection: when the SAM is callAsFunction,
+//    the synthesized wrapper is suppressed (no duplicate method error)
+@FunctionalProtocol
+public protocol Callable {
+    func callAsFunction(_ value: Int) -> Int
+}
+
+let c = CallableFunctor { $0 * 2 }
+c(21)  // → 42
+```
+
+### Default implementations in protocol extensions
+
+```swift
+// ✅ Methods in extensions don't count toward the SAM limit
+@FunctionalProtocol
+public protocol Predicate {
+    associatedtype Element
+    func evaluate(_ element: Element) -> Bool
+}
+
+extension Predicate {
+    func negate(_ element: Element) -> Bool { !evaluate(element) }
+}
+// ↑ Fine — negate() is in an extension, not in the primary declaration
+```
+
+---
+
+## What Doesn't Work
+
+### Multiple methods in the primary declaration
+
+```swift
+@FunctionalProtocol
+protocol TwoMethods {
+    func encode() -> Data
+    func decode(_ data: Data)   // ❌ error: '@FunctionalProtocol' requires exactly
+}                               //           one method in the protocol, but found multiple.
+```
+
+### No methods
+
+```swift
+@FunctionalProtocol
+protocol MarkerProtocol {
+    associatedtype ID   // ❌ error: '@FunctionalProtocol' requires exactly
+}                       //           one method in the protocol, but found none.
+```
+
+### Applied to a non-protocol type
+
+```swift
+@FunctionalProtocol
+struct Wrapper { ... }  // ❌ error: '@FunctionalProtocol' can only be applied
+                        //           to a protocol declaration.
+
+@FunctionalProtocol
+class Service { ... }   // ❌ same error
+```
+
+### Method-level generic parameters
+
+Swift cannot store a generic closure as a property — `let f: <T>(T) -> T` is not valid Swift.
+Use `associatedtype` at the protocol level instead.
+
+```swift
+@FunctionalProtocol
+protocol Caster {
+    func cast<T>(_ value: Any) -> T   // ❌ error: '@FunctionalProtocol' does not support
+}                                     //           method-level generic parameters; use
+                                      //           protocol-level 'associatedtype' instead.
+
+// ✅ Correct version:
+@FunctionalProtocol
+protocol Caster {
+    associatedtype T
+    func cast(_ value: Any) -> T
+}
+```
+
+### Existential / `any` usage (not a macro error — a Swift limitation)
+
+```swift
+// ❌ Protocols with associated types cannot be used as existentials directly.
+//    This is a Swift language constraint, not specific to this macro.
+var box: any Transformer = .transform { $0 }  // ❌ use 'some Transformer' or a concrete type
+
+// ✅ Use 'some' (opaque return) or the concrete Functor type
+func process(using t: some Transformer) { ... }
+let t: TransformerFunctor<String, String> = .transform { $0.uppercased() }
+```
+
+---
+
+## Comparison: Java `@FunctionalInterface` vs Swift `@FunctionalProtocol`
+
+| | Java `@FunctionalInterface` | Swift `@FunctionalProtocol` |
+|---|---|---|
+| Validates single abstract method | Yes | Yes — compile-time diagnostic |
+| Generates code | No | Yes — full `@frozen` bridge struct |
+| Enables closure / lambda syntax | Via JVM language feature | Via generated static factory |
+| Runtime cost | Object allocation + virtual dispatch | Zero — static dispatch, inlinable |
+| Type erasure | Yes (object reference) | No — concrete generic struct |
+| Cross-module optimization | No | Yes — `@frozen` + `@inlinable` |
+| Effects forwarding | No | Yes — `async`, `throws`, typed throws |
+| Sendable safety | No | Yes — `@Sendable` when protocol is `Sendable` |
 
 ---
 
 ## Requirements
 
-- Swift 6+
-- macOS 14+ / iOS 17+ (or any platform that supports Swift macros)
+- Swift 6.0+
+- macOS 14+ / iOS 17+ / any platform with Swift macro support
 
 ---
 

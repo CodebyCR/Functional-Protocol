@@ -47,8 +47,8 @@ func filterElements(_ elements: [String], using predicate: PredicateFunctor<Stri
     }
 }
 
-// 1. Trailing-Closure via .closure Factory
-processData(use: .closure { (input: String) -> String in
+// 1. Trailing-Closure via .transform Factory
+processData(use: .transform { (input: String) -> String in
     input.uppercased()
 }, input: "Swift 6")
 
