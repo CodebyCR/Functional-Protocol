@@ -2,7 +2,7 @@
 //
 // Attach this macro to a protocol with exactly one method requirement.
 // It generates:
-//   1. A generic bridge struct `<ProtocolName>Functor` (peer) that wraps a closure
+//   1. A generic bridge struct `<ProtocolName>Wrapper` (peer) that wraps a closure
 //   2. A `static func <methodName>(...)` factory method on the protocol (extension)
 //
 // Usage:
@@ -16,7 +16,7 @@
 //   // Then call:
 //   processData(use: .closure { $0.uppercased() })
 
-@attached(peer, names: suffixed(Functor))
+@attached(peer, names: suffixed(Wrapper))
 @attached(extension, names: arbitrary)
 public macro FunctionalProtocol() = #externalMacro(
     module: "FunctionalProtocolMacros",

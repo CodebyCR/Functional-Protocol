@@ -47,7 +47,7 @@ The correct solution looks like this:
 
 ```swift
 @frozen
-public struct TransformerFunctor<Input, Output>: Transformer {
+public struct TransformerWrapper<Input, Output>: Transformer {
     @usableFromInline internal let _transform: (Input) -> Output
 
     @inlinable
@@ -65,8 +65,8 @@ extension Transformer {
     @inlinable
     public static func transform<I, O>(
         _ block: @escaping (I) -> O
-    ) -> TransformerFunctor<I, O> where Self == TransformerFunctor<I, O> {
-        TransformerFunctor(block)
+    ) -> TransformerWrapper<I, O> where Self == TransformerWrapper<I, O> {
+        TransformerWrapper(block)
     }
 }
 ```
@@ -115,7 +115,7 @@ The macro expands to exactly:
 // — Peer (generated alongside the protocol declaration) —
 
 @frozen
-public struct TransformerFunctor<Input, Output>: Transformer {
+public struct TransformerWrapper<Input, Output>: Transformer {
 
     @usableFromInline
     internal let _transform: @Sendable (consuming Input) async throws -> Output
@@ -143,9 +143,9 @@ extension Transformer {
     @inlinable
     public static func transform<Input, Output>(
         _ block: @escaping @Sendable (consuming Input) async throws -> Output
-    ) -> TransformerFunctor<Input, Output>
-    where Self == TransformerFunctor<Input, Output> {
-        return TransformerFunctor(block)
+    ) -> TransformerWrapper<Input, Output>
+    where Self == TransformerWrapper<Input, Output> {
+        return TransformerWrapper(block)
     }
 }
 ```
@@ -180,7 +180,7 @@ public protocol Transformer {
 processData(use: .transform { $0.uppercased() })
 
 // ✅ Direct struct initializer
-let t = TransformerFunctor<String, Int> { $0.count }
+let t = TransformerWrapper<String, Int> { $0.count }
 
 // ✅ callAsFunction — call the instance like a closure
 t("Hello")  // → 5
@@ -195,7 +195,7 @@ public protocol Logger {
 }
 
 // ✅ No generics in the factory — type is fully resolved
-let logger = LoggerFunctor { print($0) }
+let logger = LoggerWrapper { print($0) }
 acceptLogger(.log { print($0) })
 ```
 
@@ -209,7 +209,7 @@ public protocol Fetcher {
 }
 
 // ✅ Effects are forwarded to the closure signature
-let f = FetcherFunctor<Data> { url in
+let f = FetcherWrapper<Data> { url in
     try await URLSession.shared.data(from: url).0
 }
 let data = try await f.fetch(someURL)
@@ -226,7 +226,7 @@ public protocol Validator {
 }
 
 // ✅ Typed throws is preserved — no type erasure on the error
-let v = ValidatorFunctor<Int> { n in
+let v = ValidatorWrapper<Int> { n in
     guard n > 0 else { throw ValidationError.negative }
     return n
 }
@@ -242,7 +242,7 @@ public protocol Worker: Sendable {
 }
 
 // ✅ Closure is @Sendable — safe to cross actor boundaries
-let w = WorkerFunctor<String> { job in
+let w = WorkerWrapper<String> { job in
     await Task.detached { print(job) }.value
 }
 ```
@@ -257,7 +257,7 @@ public protocol Sink {
 }
 
 // ✅ consuming is preserved in both the closure type and the method signature
-let sink = SinkFunctor<Data> { data in process(data) }
+let sink = SinkWrapper<Data> { data in process(data) }
 ```
 
 ### Visibility inheritance
@@ -266,17 +266,17 @@ let sink = SinkFunctor<Data> { data in process(data) }
 // ✅ public protocol → public struct (usable across modules)
 @FunctionalProtocol
 public protocol Serializer { ... }
-// Generates: public struct SerializerFunctor ...
+// Generates: public struct SerializerWrapper ...
 
 // ✅ package protocol → package struct
 @FunctionalProtocol
 package protocol InternalService { ... }
-// Generates: package struct InternalServiceFunctor ...
+// Generates: package struct InternalServiceWrapper ...
 
 // ✅ internal protocol → @usableFromInline struct (satisfies @frozen constraint)
 @FunctionalProtocol
 protocol Helper { ... }
-// Generates: @frozen @usableFromInline struct HelperFunctor ...
+// Generates: @frozen @usableFromInline struct HelperWrapper ...
 ```
 
 ### Protocol-level generics via `associatedtype`
@@ -301,7 +301,7 @@ public protocol Callable {
     func callAsFunction(_ value: Int) -> Int
 }
 
-let c = CallableFunctor { $0 * 2 }
+let c = CallableWrapper { $0 * 2 }
 c(21)  // → 42
 ```
 
@@ -382,9 +382,9 @@ protocol Caster {
 //    This is a Swift language constraint, not specific to this macro.
 var box: any Transformer = .transform { $0 }  // ❌ use 'some Transformer' or a concrete type
 
-// ✅ Use 'some' (opaque return) or the concrete Functor type
+// ✅ Use 'some' (opaque return) or the concrete Wrapper type
 func process(using t: some Transformer) { ... }
-let t: TransformerFunctor<String, String> = .transform { $0.uppercased() }
+let t: TransformerWrapper<String, String> = .transform { $0.uppercased() }
 ```
 
 ---

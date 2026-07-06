@@ -37,7 +37,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct TransformerFunctor<Input, Output>: Transformer {
+            struct TransformerWrapper<Input, Output>: Transformer {
                 @usableFromInline
                 internal let _transform: (Input) -> Output
 
@@ -59,8 +59,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Transformer {
                 @inlinable
-                static func transform<Input, Output>(_ block: @escaping (Input) -> Output) -> TransformerFunctor<Input, Output> where Self == TransformerFunctor<Input, Output> {
-                    return TransformerFunctor(block)
+                static func transform<Input, Output>(_ block: @escaping (Input) -> Output) -> TransformerWrapper<Input, Output> where Self == TransformerWrapper<Input, Output> {
+                    return TransformerWrapper(block)
                 }
             }
             """,
@@ -93,7 +93,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct PredicateFunctor<Element>: Predicate {
+            struct PredicateWrapper<Element>: Predicate {
                 @usableFromInline
                 internal let _evaluate: (Element) -> Bool
 
@@ -115,8 +115,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Predicate {
                 @inlinable
-                static func evaluate<Element>(_ block: @escaping (Element) -> Bool) -> PredicateFunctor<Element> where Self == PredicateFunctor<Element> {
-                    return PredicateFunctor(block)
+                static func evaluate<Element>(_ block: @escaping (Element) -> Bool) -> PredicateWrapper<Element> where Self == PredicateWrapper<Element> {
+                    return PredicateWrapper(block)
                 }
             }
             """,
@@ -145,7 +145,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct LoggerFunctor: Logger {
+            struct LoggerWrapper: Logger {
                 @usableFromInline
                 internal let _log: (String) -> Void
 
@@ -167,8 +167,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Logger {
                 @inlinable
-                static func log(_ block: @escaping (String) -> Void) -> LoggerFunctor where Self == LoggerFunctor {
-                    return LoggerFunctor(block)
+                static func log(_ block: @escaping (String) -> Void) -> LoggerWrapper where Self == LoggerWrapper {
+                    return LoggerWrapper(block)
                 }
             }
             """,
@@ -203,7 +203,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct ParserFunctor<Input, Output>: Parser {
+            struct ParserWrapper<Input, Output>: Parser {
                 @usableFromInline
                 internal let _parse: (Input) throws -> Output
 
@@ -225,8 +225,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Parser {
                 @inlinable
-                static func parse<Input, Output>(_ block: @escaping (Input) throws -> Output) -> ParserFunctor<Input, Output> where Self == ParserFunctor<Input, Output> {
-                    return ParserFunctor(block)
+                static func parse<Input, Output>(_ block: @escaping (Input) throws -> Output) -> ParserWrapper<Input, Output> where Self == ParserWrapper<Input, Output> {
+                    return ParserWrapper(block)
                 }
             }
             """,
@@ -261,7 +261,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct AsyncFetcherFunctor<Input, Output>: AsyncFetcher {
+            struct AsyncFetcherWrapper<Input, Output>: AsyncFetcher {
                 @usableFromInline
                 internal let _fetch: (Input) async throws -> Output
 
@@ -283,8 +283,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension AsyncFetcher {
                 @inlinable
-                static func fetch<Input, Output>(_ block: @escaping (Input) async throws -> Output) -> AsyncFetcherFunctor<Input, Output> where Self == AsyncFetcherFunctor<Input, Output> {
-                    return AsyncFetcherFunctor(block)
+                static func fetch<Input, Output>(_ block: @escaping (Input) async throws -> Output) -> AsyncFetcherWrapper<Input, Output> where Self == AsyncFetcherWrapper<Input, Output> {
+                    return AsyncFetcherWrapper(block)
                 }
             }
             """,
@@ -319,7 +319,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct SendableTransformerFunctor<Input, Output>: SendableTransformer {
+            struct SendableTransformerWrapper<Input, Output>: SendableTransformer {
                 @usableFromInline
                 internal let _transform: @Sendable (Input) -> Output
 
@@ -341,8 +341,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension SendableTransformer {
                 @inlinable
-                static func transform<Input, Output>(_ block: @escaping @Sendable (Input) -> Output) -> SendableTransformerFunctor<Input, Output> where Self == SendableTransformerFunctor<Input, Output> {
-                    return SendableTransformerFunctor(block)
+                static func transform<Input, Output>(_ block: @escaping @Sendable (Input) -> Output) -> SendableTransformerWrapper<Input, Output> where Self == SendableTransformerWrapper<Input, Output> {
+                    return SendableTransformerWrapper(block)
                 }
             }
             """,
@@ -373,7 +373,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct ConsumerFunctor<Element>: Consumer {
+            struct ConsumerWrapper<Element>: Consumer {
                 @usableFromInline
                 internal let _consume: (consuming Element) -> Void
 
@@ -395,8 +395,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Consumer {
                 @inlinable
-                static func consume<Element>(_ block: @escaping (consuming Element) -> Void) -> ConsumerFunctor<Element> where Self == ConsumerFunctor<Element> {
-                    return ConsumerFunctor(block)
+                static func consume<Element>(_ block: @escaping (consuming Element) -> Void) -> ConsumerWrapper<Element> where Self == ConsumerWrapper<Element> {
+                    return ConsumerWrapper(block)
                 }
             }
             """,
@@ -425,7 +425,7 @@ final class FunctionalProtocolTests: XCTestCase {
 
             @frozen
             @usableFromInline
-            struct CallableFunctor: Callable {
+            struct CallableWrapper: Callable {
                 @usableFromInline
                 internal let _callAsFunction: (Int) -> Int
 
@@ -442,8 +442,8 @@ final class FunctionalProtocolTests: XCTestCase {
 
             extension Callable {
                 @inlinable
-                static func callAsFunction(_ block: @escaping (Int) -> Int) -> CallableFunctor where Self == CallableFunctor {
-                    return CallableFunctor(block)
+                static func callAsFunction(_ block: @escaping (Int) -> Int) -> CallableWrapper where Self == CallableWrapper {
+                    return CallableWrapper(block)
                 }
             }
             """,
@@ -539,6 +539,148 @@ final class FunctionalProtocolTests: XCTestCase {
                     column: 25
                 ),
             ],
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    // MARK: - Access Modifiers: fileprivate
+
+    func testFileprivateProtocolExpansion() throws {
+        #if canImport(FunctionalProtocolMacros)
+        assertMacroExpansion(
+            """
+            @FunctionalProtocol
+            fileprivate protocol Validator {
+                func validate(_ s: String) -> Bool
+            }
+            """,
+            expandedSource: """
+            fileprivate protocol Validator {
+                func validate(_ s: String) -> Bool
+            }
+
+            fileprivate struct ValidatorWrapper: Validator {
+                let _validate: (String) -> Bool
+
+                fileprivate init(_ closure: @escaping (String) -> Bool) {
+                    self._validate = closure
+                }
+
+                fileprivate func validate(_ s: String) -> Bool {
+                    return _validate(s)
+                }
+
+                fileprivate func callAsFunction(_ s: String) -> Bool {
+                    return _validate(s)
+                }
+            }
+
+            extension Validator {
+                fileprivate static func validate(_ block: @escaping (String) -> Bool) -> ValidatorWrapper where Self == ValidatorWrapper {
+                    return ValidatorWrapper(block)
+                }
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    // MARK: - Access Modifiers: private
+
+    func testPrivateProtocolExpansion() throws {
+        #if canImport(FunctionalProtocolMacros)
+        assertMacroExpansion(
+            """
+            @FunctionalProtocol
+            private protocol Reducer {
+                func reduce(_ value: Int) -> Int
+            }
+            """,
+            expandedSource: """
+            private protocol Reducer {
+                func reduce(_ value: Int) -> Int
+            }
+
+            private struct ReducerWrapper: Reducer {
+                let _reduce: (Int) -> Int
+
+                private init(_ closure: @escaping (Int) -> Int) {
+                    self._reduce = closure
+                }
+
+                private func reduce(_ value: Int) -> Int {
+                    return _reduce(value)
+                }
+
+                private func callAsFunction(_ value: Int) -> Int {
+                    return _reduce(value)
+                }
+            }
+
+            extension Reducer {
+                private static func reduce(_ block: @escaping (Int) -> Int) -> ReducerWrapper where Self == ReducerWrapper {
+                    return ReducerWrapper(block)
+                }
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    // MARK: - Sendable: Swift.Sendable (fully qualified)
+
+    func testSwiftSendableProtocolExpansion() throws {
+        #if canImport(FunctionalProtocolMacros)
+        assertMacroExpansion(
+            """
+            @FunctionalProtocol
+            protocol QueueTask: Swift.Sendable {
+                func execute()
+            }
+            """,
+            expandedSource: """
+            protocol QueueTask: Swift.Sendable {
+                func execute()
+            }
+
+            @frozen
+            @usableFromInline
+            struct QueueTaskWrapper: QueueTask {
+                @usableFromInline
+                internal let _execute: @Sendable () -> Void
+
+                @inlinable
+                init(_ closure: @escaping @Sendable () -> Void) {
+                    self._execute = closure
+                }
+
+                @inlinable
+                func execute() {
+                    return _execute()
+                }
+
+                @inlinable
+                func callAsFunction() {
+                    return _execute()
+                }
+            }
+
+            extension QueueTask {
+                @inlinable
+                static func execute(_ block: @escaping @Sendable () -> Void) -> QueueTaskWrapper where Self == QueueTaskWrapper {
+                    return QueueTaskWrapper(block)
+                }
+            }
+            """,
             macros: testMacros
         )
         #else

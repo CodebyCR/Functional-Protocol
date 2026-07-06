@@ -30,7 +30,7 @@ protocol Consumer {
 // MARK: - Usage
 
 // 5. consuming – ownership transferred into the closure on each call
-let logger = ConsumerFunctor<String> { print("Consumed: \($0)") }
+let logger = ConsumerWrapper<String> { print("Consumed: \($0)") }
 logger.consume("ownership")
 
 
@@ -39,7 +39,7 @@ func processData<T: Transformer>(use transformer: T, input: T.Input) {
     print("Transformed: \(result)")
 }
 
-func filterElements(_ elements: [String], using predicate: PredicateFunctor<String>) {
+func filterElements(_ elements: [String], using predicate: PredicateWrapper<String>) {
     for element in elements {
         if predicate.evaluate(element) {
             print("✓ \(element)")
@@ -53,13 +53,13 @@ processData(use: .transform { (input: String) -> String in
 }, input: "Swift 6")
 
 // 2. Direct init of the bridge struct
-let lengthTransformer = TransformerFunctor<String, Int> { $0.count }
+let lengthTransformer = TransformerWrapper<String, Int> { $0.count }
 print("Length: \(lengthTransformer.transform("Hello"))")
 
 // 3. callAsFunction – use the instance like a function
 print("callAsFunction: \(lengthTransformer("World"))")
 
 // 4. Predicate usage
-let isLong = PredicateFunctor<String> { $0.count > 3 }
+let isLong = PredicateWrapper<String> { $0.count > 3 }
 print("Is 'Hi' long? \(isLong.evaluate("Hi"))")
 print("Is 'Hello' long? \(isLong("Hello"))")

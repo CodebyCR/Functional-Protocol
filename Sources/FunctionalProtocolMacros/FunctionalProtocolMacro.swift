@@ -3,12 +3,12 @@ import SwiftSyntaxMacros
 import SwiftDiagnostics
 
 // ╔══════════════════════════════════════════════════════════════════════════════╗
-// ║  @FunctionalProtocol – SwiftSyntax Macro Implementation                    ║
-// ║                                                                            ║
-// ║  Attached to a protocol with exactly one method requirement, this macro    ║
-// ║  generates:                                                                ║
-// ║    • A @frozen bridge struct `<ProtocolName>Functor` (PeerMacro)           ║
-// ║    • A static factory extension matching the method name (ExtensionMacro)  ║
+// ║  @FunctionalProtocol – SwiftSyntax Macro Implementation                      ║
+// ║                                                                              ║
+// ║  Attached to a protocol with exactly one method requirement, this macro      ║
+// ║  generates:                                                                  ║
+// ║    • A @frozen bridge struct `<ProtocolName>Wrapper` (PeerMacro)             ║
+// ║    • A static factory extension matching the method name (ExtensionMacro)    ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 
 // MARK: - Extracted Protocol Metadata
@@ -17,7 +17,7 @@ import SwiftDiagnostics
 /// that is needed for code generation.
 struct ProtocolInfo {
     let protocolName: String
-    let structName: String        // protocolName + "Functor"
+    let structName: String        // protocolName + "Wrapper"
     let accessModifier: String    // "public", "package", "internal", or "" (default internal)
     let associatedTypes: [String]
     let method: MethodInfo
@@ -73,7 +73,7 @@ enum FunctionalProtocolDiagnostic: String, DiagnosticMessage {
 
 public struct FunctionalProtocolMacro {}
 
-// MARK: - PeerMacro (generates `@frozen struct <Protocol>Functor`)
+// MARK: - PeerMacro (generates `@frozen struct <Protocol>Wrapper`)
 
 extension FunctionalProtocolMacro: PeerMacro {
     public static func expansion(
@@ -132,7 +132,7 @@ extension FunctionalProtocolMacro {
 
         // ── 2. Inherit access modifier ────────────────────────────────────
         // The generated struct must have the same visibility as the protocol
-        // so that users can write extensions on the functor type.
+        // so that users can write extensions on the wrapper type.
         let accessModifier: String = protocolDecl.modifiers.first { modifier in
             ["public", "package", "internal", "fileprivate", "private"]
                 .contains(modifier.name.trimmedDescription)
@@ -210,13 +210,16 @@ extension FunctionalProtocolMacro {
         }
 
         // ── 7. Check Sendable conformance ──────────────────────────────────
+        // Note: transitive conformances (e.g. `protocol Foo: Base` where `Base: Sendable`)
+        // cannot be detected at macro-expansion time without a type-resolved AST.
         let isSendable = protocolDecl.inheritanceClause?.inheritedTypes.contains {
-            $0.type.trimmedDescription == "Sendable"
+            let name = $0.type.trimmedDescription
+            return name == "Sendable" || name == "Swift.Sendable"
         } ?? false
 
         return ProtocolInfo(
             protocolName: protocolName,
-            structName: "\(protocolName)Functor",
+            structName: "\(protocolName)Wrapper",
             accessModifier: accessModifier,
             associatedTypes: associatedTypes,
             method: MethodInfo(
@@ -294,7 +297,7 @@ extension FunctionalProtocolMacro {
         info.accessModifier.isEmpty ? "" : "\(info.accessModifier) "
     }
 
-    // ── Peer: @frozen struct <Protocol>Functor ──────────────────────────────
+    // ── Peer: @frozen struct <Protocol>Wrapper ──────────────────────────────
 
     private static func generateBridgeStruct(from info: ProtocolInfo) -> DeclSyntax {
         let generics  = genericClause(for: info.associatedTypes)
@@ -306,48 +309,58 @@ extension FunctionalProtocolMacro {
         let args      = callArguments(for: info.method.parameters)
         let access    = acc(for: info)
         let propName  = "_\(info.method.name)"
-        // @frozen on an internal type requires @usableFromInline.
-        let usableAnnotation = info.accessModifier.isEmpty ? "\n@usableFromInline" : ""
+
+        // @frozen is only legal on public, package, or internal+@usableFromInline types.
+        // fileprivate/private types must not carry @frozen (or @inlinable/@usableFromInline).
+        let isRestricted = info.accessModifier == "fileprivate" || info.accessModifier == "private"
+
+        // Annotations that appear before the struct keyword:
+        //   public/package  → "@frozen\n"
+        //   internal        → "@frozen\n@usableFromInline\n"  (internal needs @usableFromInline)
+        //   fileprivate/private → ""  (@frozen is illegal here)
+        let structHeaderAnnotation: String
+        if isRestricted {
+            structHeaderAnnotation = ""
+        } else if info.accessModifier.isEmpty {
+            structHeaderAnnotation = "@frozen\n@usableFromInline\n"
+        } else {
+            structHeaderAnnotation = "@frozen\n"
+        }
+
+        // @inlinable and @usableFromInline are only valid above fileprivate/private.
+        let inlinable    = isRestricted ? "" : "@inlinable\n    "
+        let propAnnotation = isRestricted ? "" : "@usableFromInline\n    internal "
 
         // When the SAM is itself `callAsFunction`, suppress the synthesized
         // wrapper to avoid a duplicate method declaration in the struct.
         if info.method.name == "callAsFunction" {
             return """
-            @frozen\(raw: usableAnnotation)
-            \(raw: access)struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
-                @usableFromInline
-                internal let \(raw: propName): \(raw: closureT)
+            \(raw: structHeaderAnnotation)\(raw: access)struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
+                \(raw: propAnnotation)let \(raw: propName): \(raw: closureT)
 
-                @inlinable
-                \(raw: access)init(_ closure: @escaping \(raw: closureT)) {
+                \(raw: inlinable)\(raw: access)init(_ closure: @escaping \(raw: closureT)) {
                     self.\(raw: propName) = closure
                 }
 
-                @inlinable
-                \(raw: access)func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
+                \(raw: inlinable)\(raw: access)func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
                     return \(raw: callPfx)\(raw: propName)(\(raw: args))
                 }
             }
             """
         } else {
             return """
-            @frozen\(raw: usableAnnotation)
-            \(raw: access)struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
-                @usableFromInline
-                internal let \(raw: propName): \(raw: closureT)
+            \(raw: structHeaderAnnotation)\(raw: access)struct \(raw: info.structName)\(raw: generics): \(raw: info.protocolName) {
+                \(raw: propAnnotation)let \(raw: propName): \(raw: closureT)
 
-                @inlinable
-                \(raw: access)init(_ closure: @escaping \(raw: closureT)) {
+                \(raw: inlinable)\(raw: access)init(_ closure: @escaping \(raw: closureT)) {
                     self.\(raw: propName) = closure
                 }
 
-                @inlinable
-                \(raw: access)func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
+                \(raw: inlinable)\(raw: access)func \(raw: info.method.name)\(raw: params)\(raw: effects)\(raw: retClause) {
                     return \(raw: callPfx)\(raw: propName)(\(raw: args))
                 }
 
-                @inlinable
-                \(raw: access)func callAsFunction\(raw: params)\(raw: effects)\(raw: retClause) {
+                \(raw: inlinable)\(raw: access)func callAsFunction\(raw: params)\(raw: effects)\(raw: retClause) {
                     return \(raw: callPfx)\(raw: propName)(\(raw: args))
                 }
             }
@@ -364,10 +377,12 @@ extension FunctionalProtocolMacro {
         let whereClause = "where Self == \(structT)"
         let access      = acc(for: info)
 
+        let isRestricted = info.accessModifier == "fileprivate" || info.accessModifier == "private"
+        let inlinable    = isRestricted ? "" : "@inlinable\n    "
+
         let extensionSource: DeclSyntax = """
         extension \(raw: info.protocolName) {
-            @inlinable
-            \(raw: access)static func \(raw: info.method.name)\(raw: generics)(_ block: @escaping \(raw: closureT)) -> \(raw: structT) \(raw: whereClause) {
+            \(raw: inlinable)\(raw: access)static func \(raw: info.method.name)\(raw: generics)(_ block: @escaping \(raw: closureT)) -> \(raw: structT) \(raw: whereClause) {
                 return \(raw: info.structName)(block)
             }
         }
