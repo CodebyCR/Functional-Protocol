@@ -1,4 +1,4 @@
-# `@FunctionalProtocol`
+## `@FunctionalProtocol`
 
 A Swift 6 compiler macro that derives a zero-cost closure wrapper for any Single Abstract Method (SAM) protocol — one annotation, no boilerplate, full optimizer visibility.
 
